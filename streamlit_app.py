@@ -1,0 +1,169 @@
+import os
+from pathlib import Path
+
+import requests
+import streamlit as st
+
+
+API_URL = os.getenv("RAG_API_URL", "http://localhost:8000")
+
+st.set_page_config(page_title="RAG Knowledge Assistant", layout="wide")
+st.title("RAG Knowledge Assistant")
+st.write("Upload mixed file types, rebuild the index, and ask grounded questions.")
+
+with st.sidebar:
+    st.header("Knowledge Base")
+    st.caption("Supported file types: PDF, DOCX, TXT, CSV, XLS, XLSX.")
+    uploaded_files = st.file_uploader(
+        "Add documents",
+        type=["pdf", "docx", "txt", "csv", "xls", "xlsx"],
+        accept_multiple_files=True,
+    )
+
+    # Keep a session-scoped map of filename -> chunk_count so UI can show
+    # counts until files are removed from the knowledge base.
+    if "file_chunks" not in st.session_state:
+        st.session_state["file_chunks"] = {}
+
+    # Display tracked files and counts for this session
+    if st.session_state["file_chunks"]:
+        st.markdown("**Indexed files (tracked this session)**")
+        for name, cnt in list(st.session_state["file_chunks"].items()):
+            cols = st.columns([4, 1])
+            cols[0].write(f"{name} — {cnt} chunk(s)")
+            if cols[1].button("Remove", key=f"remove_{name}"):
+                # Remove from session-only tracking; does not delete server file
+                st.session_state["file_chunks"].pop(name, None)
+                st.experimental_rerun()
+
+    if st.button("Index uploaded documents"):
+        if not uploaded_files:
+            st.warning("Upload at least one document first.")
+        else:
+            try:
+                multipart_files = [
+                    (
+                        "files",
+                        (
+                            Path(uploaded_file.name).name,
+                            uploaded_file.getvalue(),
+                            uploaded_file.type or "application/octet-stream",
+                        ),
+                    )
+                    for uploaded_file in uploaded_files
+                ]
+                with st.spinner("Indexing documents — this may take a while..."):
+                    response = requests.post(f"{API_URL}/ingest", files=multipart_files, timeout=600)
+                    response.raise_for_status()
+                    data = response.json()
+
+                index_info = data.get("index") or {}
+                chunk_count = index_info.get("chunk_count", 0)
+                file_count = index_info.get("file_count", len(uploaded_files))
+                per_file = index_info.get("per_file_counts", {})
+
+                # Update UI session map with per-file counts
+                for name, cnt in per_file.items():
+                    st.session_state["file_chunks"][name] = cnt
+
+                st.success(f"Indexed {chunk_count} chunks from {file_count} file(s).")
+                if chunk_count:
+                    st.info(f"Indexed chunks: {chunk_count}")
+            except Exception as e:
+                st.error(f"Failed to index documents: {str(e)}")
+
+    if st.button("Rebuild index from project sources"):
+        try:
+            with st.spinner("Rebuilding index — please wait..."):
+                response = requests.post(f"{API_URL}/reindex", timeout=600)
+                response.raise_for_status()
+                data = response.json()
+
+            index_info = data.get("index") or {}
+            chunk_count = index_info.get("chunk_count", 0)
+            file_count = index_info.get("file_count", 0)
+            per_file = index_info.get("per_file_counts", {})
+
+            # Refresh session map from server mapping
+            st.session_state["file_chunks"].update(per_file)
+
+            st.success(f"Rebuilt index with {chunk_count} chunks across {file_count} file(s).")
+            if chunk_count:
+                st.info(f"Indexed chunks: {chunk_count}")
+        except Exception as e:
+            st.error(f"Failed to rebuild index: {str(e)}")
+
+question = st.text_area(
+    "Ask a question about the indexed documents",
+    height=140,
+    placeholder="Example: What does the document say about the workflow or setup?",
+)
+
+if st.button("Ask"):
+    if not question.strip():
+        st.warning("Enter a question first.")
+    else:
+        try:
+            with st.spinner("Querying indexed documents and running agents..."):
+                response = requests.post(
+                    f"{API_URL}/ask",
+                    json={"question": question},
+                    timeout=180,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            # New API returns top-level keys: 'retrieved', 'agent_result', 'evaluation'
+            retrieved = data.get("retrieved") or {}
+            agent_result = data.get("agent_result") or {}
+            evaluation = data.get("evaluation") or {}
+
+            # Backwards compatibility: older API placed results under 'result'
+            if not agent_result and data.get("result"):
+                legacy = data.get("result")
+                # try common legacy fields
+                agent_result = {
+                    "final": legacy.get("answer") or legacy.get("final") or "",
+                    "research": None,
+                    "written": None,
+                }
+
+            st.subheader("Answer (Agent final output)")
+            final_text = agent_result.get("final") or ""
+            if final_text and final_text.strip():
+                st.write(final_text)
+            else:
+                st.info("No final agent output returned.")
+
+            st.subheader("Retrieved Context")
+            context_text = retrieved.get("context") if isinstance(retrieved, dict) else None
+            if context_text and context_text.strip():
+                st.text_area("Context sent to agents", value=context_text, height=200)
+            else:
+                st.info("No context returned or no documents indexed.")
+
+            # Show meta information
+            st.markdown("**Retrieval summary**")
+            st.write(f"Documents returned: {retrieved.get('count', 0)}")
+            if retrieved.get("docs"):
+                st.write(retrieved.get("docs"))
+
+            st.markdown("**Evaluation**")
+            if evaluation:
+                st.json(evaluation)
+
+            st.subheader("Agent pipeline outputs")
+            if agent_result:
+                with st.expander("Research output"):
+                    st.text(agent_result.get("research") or "(none)")
+                with st.expander("Written output"):
+                    st.text(agent_result.get("written") or "(none)")
+            else:
+                st.info("No agent outputs available.")
+
+            with st.expander("Full API response"):
+                st.json(data)
+        except Exception as e:
+            st.error(
+                f"Connection error: {str(e)}\n\nMake sure the API server is running on {API_URL}"
+            )
