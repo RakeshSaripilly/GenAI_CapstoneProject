@@ -6,7 +6,7 @@ langchain-community
 langchain-classic
 langchain-text-splitters
 fastapi
-uvicorn[standard]
+uvicorn
 streamlit
 python-dotenv
 pydantic
@@ -20,4 +20,3 @@ xlrd
 python-multipart
 requests
 chromadb
-python-docx
