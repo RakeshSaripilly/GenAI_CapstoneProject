@@ -115,6 +115,18 @@ with st.sidebar:
         except Exception as e:
             st.error(f"Failed to rebuild index: {str(e)}")
 
+    st.markdown("---")
+    if st.button("Clear Database & Session", help="Wipe all uploaded documents and reset vector database storage"):
+        try:
+            with st.spinner("Clearing storage..."):
+                response = requests.post(f"{API_URL}/clear", timeout=30)
+                response.raise_for_status()
+            st.session_state["file_chunks"] = {}
+            st.success("Session storage cleared successfully!")
+            st.experimental_rerun()
+        except Exception as e:
+            st.error(f"Failed to clear session: {str(e)}")
+
 question = st.text_area(
     "Ask a question about the indexed documents",
     height=140,

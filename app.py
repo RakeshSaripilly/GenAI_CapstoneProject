@@ -36,6 +36,55 @@ def _collect_file_paths() -> list[str]:
     return sorted(file_paths)
 
 
+def _clear_local_storage() -> None:
+    global ACTIVE_CHAIN, ACTIVE_RETRIEVER, ACTIVE_CHUNK_COUNT, ACTIVE_PER_FILE_COUNTS
+
+    # 1. Reset active RAG chain states
+    ACTIVE_CHAIN = None
+    ACTIVE_RETRIEVER = None
+    ACTIVE_CHUNK_COUNT = 0
+    ACTIVE_PER_FILE_COUNTS = {}
+
+    # 2. Reset Chroma Collection
+    try:
+        from langchain_community.vectorstores import Chroma
+        from langchain_community.embeddings import HuggingFaceBgeEmbeddings
+        from config import config
+        import os
+
+        embeddings = HuggingFaceBgeEmbeddings(model_name=config.embedding_model)
+        collection_name = os.getenv("CHROMA_COLLECTION", "capstone_collection")
+        persist_dir = os.getenv("CHROMA_PERSIST_DIRECTORY", str(PROJECT_ROOT / "chroma_db"))
+
+        vectorstore = Chroma(
+            collection_name=collection_name,
+            embedding_function=embeddings,
+            persist_directory=persist_dir
+        )
+        vectorstore.delete_collection()
+    except Exception as e:
+        print(f"Error resetting Chroma collection: {str(e)}")
+
+    # 3. Clean uploaded files
+    if KNOWLEDGE_BASE_DIR.exists():
+        try:
+            shutil.rmtree(KNOWLEDGE_BASE_DIR)
+        except Exception as e:
+            print(f"Error clearing upload directory: {str(e)}")
+
+    # 4. Clean local Chroma directory files
+    persist_path = Path(os.getenv("CHROMA_PERSIST_DIRECTORY", str(PROJECT_ROOT / "chroma_db")))
+    if persist_path.exists():
+        try:
+            shutil.rmtree(persist_path)
+        except Exception as e:
+            print(f"Error clearing Chroma directory: {str(e)}")
+
+    # Ensure empty directories exist for new uploads
+    KNOWLEDGE_BASE_DIR.mkdir(parents=True, exist_ok=True)
+    UPLOADED_FILES_DIR.mkdir(parents=True, exist_ok=True)
+
+
 def _refresh_chain() -> dict:
     global ACTIVE_CHAIN, ACTIVE_CHUNK_COUNT
     global ACTIVE_RETRIEVER, ACTIVE_PER_FILE_COUNTS
@@ -54,6 +103,8 @@ def _refresh_chain() -> dict:
 
 @app.on_event("startup")
 def startup_index() -> None:
+    # Clear databases and uploaded files on server startup
+    _clear_local_storage()
     _refresh_chain()
 
 
@@ -199,3 +250,13 @@ def health_check():
         "indexed_files": len(_collect_file_paths()),
         "chunks": ACTIVE_CHUNK_COUNT,
     }
+
+
+@app.post("/clear")
+def clear_api():
+    """Wipe the uploaded files and the vector database."""
+    try:
+        _clear_local_storage()
+        return {"status": "success", "message": "Storage successfully cleared."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to clear storage: {str(e)}")
