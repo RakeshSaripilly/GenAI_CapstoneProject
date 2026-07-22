@@ -29,7 +29,8 @@ def start_backend_if_needed(port=8000):
 # Try to auto-start backend
 start_backend_if_needed(8000)
 
-API_URL = os.getenv("RAG_API_URL", "http://127.0.0.1:8000")
+env_api_url = os.getenv("RAG_API_URL", "").strip()
+API_URL = env_api_url if env_api_url else "http://127.0.0.1:8000"
 
 def wait_for_backend(port=8000, timeout=45):
     """Poll the backend port until it is ready to accept connections."""

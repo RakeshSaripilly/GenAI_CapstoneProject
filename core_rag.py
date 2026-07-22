@@ -4,13 +4,41 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pandas as pd
+import httpx
 from dotenv import load_dotenv
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceBgeEmbeddings
+from langchain_core.embeddings import Embeddings
 from langchain_groq import ChatGroq
 from langchain_core.documents import Document
 from langchain_classic.chains import create_retrieval_chain, create_history_aware_retriever
+
+class GroqEmbeddings(Embeddings):
+    """Custom embedding class leveraging Groq's hosted nomic-embed-text-v1.5 model."""
+    def __init__(self, api_key: str, model_name: str = "nomic-embed-text-v1.5"):
+        self.api_key = api_key
+        self.model_name = model_name
+        self.url = "https://api.groq.com/openai/v1/embeddings"
+        
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        if not self.api_key:
+            raise ValueError("GROQ_API_KEY environment variable is not set.")
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "input": texts,
+            "model": self.model_name
+        }
+        with httpx.Client() as client:
+            response = client.post(self.url, json=payload, headers=headers, timeout=30.0)
+            response.raise_for_status()
+            data = response.json()
+            return [item["embedding"] for item in data["data"]]
+            
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed_documents([text])[0]
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
@@ -169,7 +197,7 @@ def _build_chain_from_documents(documents):
     if not chunks:
         raise ValueError("No content could be extracted from the uploaded file(s).")
 
-    embeddings = HuggingFaceBgeEmbeddings(model_name=config.embedding_model)
+    embeddings = GroqEmbeddings(api_key=os.getenv("GROQ_API_KEY"))
 
     # Use ChromaDB only for persistence and retrieval.
     from langchain_community.vectorstores import Chroma
@@ -254,7 +282,7 @@ def build_rag_chain_from_files(file_paths: list[str]):
     if not all_chunks:
         raise ValueError("No content could be extracted from the uploaded file(s).")
 
-    embeddings = HuggingFaceBgeEmbeddings(model_name=config.embedding_model)
+    embeddings = GroqEmbeddings(api_key=os.getenv("GROQ_API_KEY"))
     from langchain_community.vectorstores import Chroma
 
     collection_name = os.getenv("CHROMA_COLLECTION", "capstone_collection")
