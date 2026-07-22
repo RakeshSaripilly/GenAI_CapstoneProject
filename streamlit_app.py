@@ -18,16 +18,53 @@ def start_backend_if_needed(port=8000):
         try:
             # Start FastAPI backend in the background using the current Python environment
             backend_cmd = [sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(port)]
-            subprocess.Popen(backend_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Direct uvicorn logs to backend.log to debug issues
+            log_file = open("backend.log", "w", encoding="utf-8")
+            subprocess.Popen(backend_cmd, stdout=log_file, stderr=subprocess.STDOUT)
             # Give it a moment to boot
-            time.sleep(3)
+            time.sleep(4)
         except Exception as e:
             st.error(f"Could not auto-start backend API: {str(e)}")
 
 # Try to auto-start backend
 start_backend_if_needed(8000)
 
-API_URL = os.getenv("RAG_API_URL", "http://localhost:8000")
+API_URL = os.getenv("RAG_API_URL", "http://127.0.0.1:8000")
+
+def wait_for_backend(port=8000, timeout=45):
+    """Poll the backend port until it is ready to accept connections."""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex(("127.0.0.1", port)) == 0:
+                return True
+        time.sleep(1)
+    return False
+
+def make_api_request(method, endpoint, **kwargs):
+    """Safely execute HTTP request after ensuring backend is fully running and active."""
+    # Ensure background process is started
+    start_backend_if_needed(8000)
+    
+    # Wait for backend to be ready to accept connections
+    if not wait_for_backend(8000, timeout=45):
+        # Retrieve logs to see why the API failed to start
+        log_content = ""
+        try:
+            log_path = Path("backend.log")
+            if log_path.exists():
+                with open(log_path, "r", encoding="utf-8") as f:
+                    log_content = f.read()[-1500:] # Show the last 1500 chars of logs
+        except Exception as log_err:
+            log_content = f"Failed to retrieve backend logs: {str(log_err)}"
+            
+        raise ConnectionError(
+            f"The backend API failed to respond on port 8000 after 45 seconds.\n\n"
+            f"🔍 **Backend Startup Logs:**\n```\n{log_content}\n```"
+        )
+        
+    url = f"{API_URL}{endpoint}"
+    return requests.request(method, url, **kwargs)
 
 st.set_page_config(page_title="RAG Knowledge Assistant", layout="wide")
 st.title("RAG Knowledge Assistant")
@@ -80,7 +117,7 @@ with st.sidebar:
                     time.sleep(1)
                     status.write("📄 Extracting text and parsing document layout...")
                     
-                    response = requests.post(f"{API_URL}/ingest", files=multipart_files, timeout=600)
+                    response = make_api_request("POST", "/ingest", files=multipart_files, timeout=600)
                     response.raise_for_status()
                     data = response.json()
                     
@@ -119,7 +156,7 @@ with st.sidebar:
                 time.sleep(1)
                 status.write("📄 Loading and parsing documents...")
                 
-                response = requests.post(f"{API_URL}/reindex", timeout=600)
+                response = make_api_request("POST", "/reindex", timeout=600)
                 response.raise_for_status()
                 data = response.json()
                 
@@ -154,7 +191,7 @@ with st.sidebar:
     if st.button("Clear Database & Session", help="Wipe all uploaded documents and reset vector database storage"):
         try:
             with st.spinner("Clearing storage..."):
-                response = requests.post(f"{API_URL}/clear", timeout=30)
+                response = make_api_request("POST", "/clear", timeout=30)
                 response.raise_for_status()
             st.session_state["file_chunks"] = {}
             st.success("Session storage cleared successfully!")
@@ -257,8 +294,9 @@ if st.button("Ask"):
                 """, unsafe_allow_html=True)
 
             try:
-                response = requests.post(
-                    f"{API_URL}/ask",
+                response = make_api_request(
+                    "POST",
+                    "/ask",
                     json={"question": question},
                     timeout=180,
                 )
