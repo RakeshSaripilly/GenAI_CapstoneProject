@@ -1,3 +1,14 @@
+---
+title: RAG Knowledge Assistant
+emoji: 📚
+colorFrom: blue
+colorTo: indigo
+sdk: streamlit
+sdk_version: 1.35.0
+app_file: streamlit_app.py
+pinned: false
+---
+
 # Research Writer Agent - Complete Project Guide
 
 ## 📚 Project Overview

@@ -1,9 +1,31 @@
 import os
+import socket
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 import requests
 import streamlit as st
 
+# Automatically launch the backend API if it isn't running
+def start_backend_if_needed(port=8000):
+    # Check if the port is already bound (API is already running)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        is_running = s.connect_ex(("127.0.0.1", port)) == 0
+        
+    if not is_running:
+        try:
+            # Start FastAPI backend in the background using the current Python environment
+            backend_cmd = [sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(port)]
+            subprocess.Popen(backend_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Give it a moment to boot
+            time.sleep(3)
+        except Exception as e:
+            st.error(f"Could not auto-start backend API: {str(e)}")
+
+# Try to auto-start backend
+start_backend_if_needed(8000)
 
 API_URL = os.getenv("RAG_API_URL", "http://localhost:8000")
 
