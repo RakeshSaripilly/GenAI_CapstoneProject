@@ -45,35 +45,16 @@ def _clear_local_storage() -> None:
     ACTIVE_CHUNK_COUNT = 0
     ACTIVE_PER_FILE_COUNTS = {}
 
-    # 2. Reset Chroma Collection
-    try:
-        from langchain_community.vectorstores import Chroma
-        from langchain_community.embeddings import HuggingFaceBgeEmbeddings
-        from config import config
-        import os
-
-        embeddings = HuggingFaceBgeEmbeddings(model_name=config.embedding_model)
-        collection_name = os.getenv("CHROMA_COLLECTION", "capstone_collection")
-        persist_dir = os.getenv("CHROMA_PERSIST_DIRECTORY", str(PROJECT_ROOT / "chroma_db"))
-
-        vectorstore = Chroma(
-            collection_name=collection_name,
-            embedding_function=embeddings,
-            persist_directory=persist_dir
-        )
-        vectorstore.delete_collection()
-    except Exception as e:
-        print(f"Error resetting Chroma collection: {str(e)}")
-
-    # 3. Clean uploaded files
+    # 2. Clean uploaded files directory
     if KNOWLEDGE_BASE_DIR.exists():
         try:
             shutil.rmtree(KNOWLEDGE_BASE_DIR)
         except Exception as e:
             print(f"Error clearing upload directory: {str(e)}")
 
-    # 4. Clean local Chroma directory files
-    persist_path = Path(os.getenv("CHROMA_PERSIST_DIRECTORY", str(PROJECT_ROOT / "chroma_db")))
+    # 3. Clean local Chroma directory directly on disk
+    persist_dir = os.getenv("CHROMA_PERSIST_DIRECTORY", str(PROJECT_ROOT / "chroma_db"))
+    persist_path = Path(persist_dir)
     if persist_path.exists():
         try:
             shutil.rmtree(persist_path)
