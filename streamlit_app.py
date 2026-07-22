@@ -8,6 +8,11 @@ from pathlib import Path
 import requests
 import streamlit as st
 
+# MUST be the first Streamlit command executed
+st.set_page_config(page_title="RAG Knowledge Assistant", layout="wide")
+st.title("RAG Knowledge Assistant")
+st.write("Upload mixed file types, rebuild the index, and ask grounded questions.")
+
 # Automatically launch the backend API if it isn't running
 def start_backend_if_needed(port=8000):
     # Check if the port is already bound (API is already running)
@@ -66,10 +71,6 @@ def make_api_request(method, endpoint, **kwargs):
         
     url = f"{API_URL}{endpoint}"
     return requests.request(method, url, **kwargs)
-
-st.set_page_config(page_title="RAG Knowledge Assistant", layout="wide")
-st.title("RAG Knowledge Assistant")
-st.write("Upload mixed file types, rebuild the index, and ask grounded questions.")
 
 with st.sidebar:
     st.header("Knowledge Base")
