@@ -74,10 +74,21 @@ with st.sidebar:
                     )
                     for uploaded_file in uploaded_files
                 ]
-                with st.spinner("Indexing documents — this may take a while..."):
+                
+                with st.status("Indexing documents...", expanded=True) as status:
+                    status.write("📤 Uploading files to the backend server...")
+                    time.sleep(1)
+                    status.write("📄 Extracting text and parsing document layout...")
+                    
                     response = requests.post(f"{API_URL}/ingest", files=multipart_files, timeout=600)
                     response.raise_for_status()
                     data = response.json()
+                    
+                    status.write("🧠 Splitting text into chunks and generating vector embeddings...")
+                    time.sleep(1)
+                    status.write("💾 Indexing vectors into local Chroma database...")
+                    time.sleep(0.5)
+                    status.update(label="Document indexing complete!", state="complete", expanded=False)
 
                 index_info = data.get("index") or {}
                 chunk_count = index_info.get("chunk_count", 0)
@@ -88,18 +99,35 @@ with st.sidebar:
                 for name, cnt in per_file.items():
                     st.session_state["file_chunks"][name] = cnt
 
-                st.success(f"Indexed {chunk_count} chunks from {file_count} file(s).")
-                if chunk_count:
-                    st.info(f"Indexed chunks: {chunk_count}")
+                # Display summary metrics
+                st.markdown("### 📊 Indexing Summary")
+                col1, col2 = st.columns(2)
+                col1.metric("Files Processed", f"📁 {file_count}")
+                col2.metric("Total Chunks Created", f"🧠 {chunk_count}")
+
+                if per_file:
+                    with st.expander("Show detailed chunks breakdown", expanded=True):
+                        for name, cnt in per_file.items():
+                            st.write(f"📄 `{name}`: **{cnt}** chunks")
             except Exception as e:
                 st.error(f"Failed to index documents: {str(e)}")
 
     if st.button("Rebuild index from project sources"):
         try:
-            with st.spinner("Rebuilding index — please wait..."):
+            with st.status("Rebuilding index...", expanded=True) as status:
+                status.write("🔎 Scanning project directories for compatible documents...")
+                time.sleep(1)
+                status.write("📄 Loading and parsing documents...")
+                
                 response = requests.post(f"{API_URL}/reindex", timeout=600)
                 response.raise_for_status()
                 data = response.json()
+                
+                status.write("🧠 Chunking contents and running embedding model...")
+                time.sleep(1)
+                status.write("💾 Updating the Chroma vector store...")
+                time.sleep(0.5)
+                status.update(label="Reindexing complete!", state="complete", expanded=False)
 
             index_info = data.get("index") or {}
             chunk_count = index_info.get("chunk_count", 0)
@@ -109,9 +137,16 @@ with st.sidebar:
             # Refresh session map from server mapping
             st.session_state["file_chunks"].update(per_file)
 
-            st.success(f"Rebuilt index with {chunk_count} chunks across {file_count} file(s).")
-            if chunk_count:
-                st.info(f"Indexed chunks: {chunk_count}")
+            # Display summary metrics
+            st.markdown("### 📊 Reindex Summary")
+            col1, col2 = st.columns(2)
+            col1.metric("Files Processed", f"📁 {file_count}")
+            col2.metric("Total Chunks Created", f"🧠 {chunk_count}")
+
+            if per_file:
+                with st.expander("Show detailed chunks breakdown", expanded=True):
+                    for name, cnt in per_file.items():
+                        st.write(f"📄 `{name}`: **{cnt}** chunks")
         except Exception as e:
             st.error(f"Failed to rebuild index: {str(e)}")
 
@@ -138,7 +173,90 @@ if st.button("Ask"):
         st.warning("Enter a question first.")
     else:
         try:
-            with st.spinner("Querying indexed documents and running agents..."):
+            # Create a placeholder to inject the custom CSS pulsing loader animation
+            loader_placeholder = st.empty()
+            with loader_placeholder.container():
+                st.markdown("""
+                    <div class="loading-box">
+                        <div class="loading-content">
+                            <div class="spinner-ring"></div>
+                            <div class="pulsing-orb"></div>
+                        </div>
+                        <div class="loading-msg">🤖 RAG Agents are researching and writing...</div>
+                    </div>
+                    <style>
+                    .loading-box {
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        justify-content: center;
+                        padding: 30px;
+                        margin: 20px 0;
+                        border-radius: 15px;
+                        background: rgba(139, 92, 246, 0.05);
+                        border: 1px solid rgba(139, 92, 246, 0.15);
+                        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+                        backdrop-filter: blur(8px);
+                        animation: fadeIn 0.4s ease-out;
+                    }
+                    .loading-content {
+                        position: relative;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        width: 80px;
+                        height: 80px;
+                    }
+                    .spinner-ring {
+                        box-sizing: border-box;
+                        width: 70px;
+                        height: 70px;
+                        border: 4px solid transparent;
+                        border-top: 4px solid #6366f1;
+                        border-right: 4px solid #8b5cf6;
+                        border-bottom: 4px solid #ec4899;
+                        border-radius: 50%;
+                        animation: spin 1.2s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+                    }
+                    .pulsing-orb {
+                        position: absolute;
+                        width: 32px;
+                        height: 32px;
+                        background: radial-gradient(circle, #a78bfa 0%, #8b5cf6 50%, #6366f1 100%);
+                        border-radius: 50%;
+                        box-shadow: 0 0 15px rgba(99, 102, 241, 0.6), 0 0 30px rgba(139, 92, 246, 0.4);
+                        animation: pulse 1.8s ease-in-out infinite;
+                    }
+                    .loading-msg {
+                        margin-top: 20px;
+                        font-family: 'Outfit', -apple-system, sans-serif;
+                        color: #a78bfa;
+                        font-size: 1.15rem;
+                        font-weight: 600;
+                        letter-spacing: 0.5px;
+                        text-align: center;
+                        animation: blink 2s ease-in-out infinite;
+                    }
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                    @keyframes pulse {
+                        0%, 100% { transform: scale(0.9); opacity: 0.8; box-shadow: 0 0 15px rgba(99, 102, 241, 0.5); }
+                        50% { transform: scale(1.15); opacity: 1; box-shadow: 0 0 25px rgba(99, 102, 241, 0.8), 0 0 45px rgba(139, 92, 246, 0.6); }
+                    }
+                    @keyframes blink {
+                        0%, 100% { opacity: 0.7; }
+                        50% { opacity: 1; }
+                    }
+                    @keyframes fadeIn {
+                        from { opacity: 0; transform: translateY(8px); }
+                        to { opacity: 1; transform: translateY(0); }
+                    }
+                    </style>
+                """, unsafe_allow_html=True)
+
+            try:
                 response = requests.post(
                     f"{API_URL}/ask",
                     json={"question": question},
@@ -146,6 +264,9 @@ if st.button("Ask"):
                 )
                 response.raise_for_status()
                 data = response.json()
+            finally:
+                # Always clean up the loader placeholder from screen
+                loader_placeholder.empty()
 
             # New API returns top-level keys: 'retrieved', 'agent_result', 'evaluation'
             retrieved = data.get("retrieved") or {}
